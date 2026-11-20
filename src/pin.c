@@ -38,17 +38,20 @@ static struct {
     bool top_all; /* the setting: every pin above other windows */
 } P;
 
-/* Onto the screen with the picture already drawn. The window has a frame (for the shadow;
- * WM_NCCALCSIZE leaves none of it in sight), and Windows first shows such a window as that
- * frame, white with its title on top, until the program has painted. Cloaked, it is shown to
- * nobody while it paints. */
-static void pin_reveal(HWND hw)
+/* Paint while cloaked. WM_PAINT can finish before DWM picks up the GDI
+ * surface, leaving a white frame if the cloak comes off immediately. */
+static void pin_reveal(Pin *first, Pin *end)
 {
     BOOL on = TRUE, off = FALSE;
-    DwmSetWindowAttribute(hw, DWMWA_CLOAK, &on, sizeof on);
-    ShowWindow(hw, SW_SHOWNOACTIVATE);
-    UpdateWindow(hw);
-    DwmSetWindowAttribute(hw, DWMWA_CLOAK, &off, sizeof off);
+    for (Pin *p = first; p != end; p = p->next) {
+        DwmSetWindowAttribute(p->hwnd, DWMWA_CLOAK, &on, sizeof on);
+        ShowWindow(p->hwnd, SW_SHOWNOACTIVATE);
+        RedrawWindow(p->hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+    }
+    GdiFlush();
+    DwmFlush(); /* one composition wait even when restoring several pins */
+    for (Pin *p = first; p != end; p = p->next)
+        DwmSetWindowAttribute(p->hwnd, DWMWA_CLOAK, &off, sizeof off);
 }
 
 /* A pin is above other windows when all pins are, or when it was told to be itself. */
@@ -433,7 +436,7 @@ bool pin_add(Img *img, int x, int y, bool at_cursor)
     BOOL still = TRUE; /* it is there at once: no opening or closing animation */
     DwmSetWindowAttribute(hw, DWMWA_TRANSITIONS_FORCEDISABLED, &still, sizeof still);
     SetWindowPos(hw, P.top_all ? HWND_TOPMOST : HWND_TOP, x, y, w, h, SWP_FRAMECHANGED | SWP_NOACTIVATE);
-    pin_reveal(hw);
+    pin_reveal(p, p->next);
     SetForegroundWindow(hw);
     return true;
 }
@@ -448,15 +451,11 @@ bool pin_any_visible(void)
 
 void pin_toggle_all(void)
 {
-    bool any_visible = false;
-    for (Pin *p = P.list; p; p = p->next)
-        if (IsWindowVisible(p->hwnd))
-            any_visible = true;
-    for (Pin *p = P.list; p; p = p->next) {
-        if (any_visible)
+    if (pin_any_visible()) {
+        for (Pin *p = P.list; p; p = p->next)
             ShowWindow(p->hwnd, SW_HIDE);
-        else
-            pin_reveal(p->hwnd);
+    } else if (P.list) {
+        pin_reveal(P.list, NULL);
     }
 }
 
