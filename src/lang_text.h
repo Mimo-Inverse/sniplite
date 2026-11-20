@@ -903,9 +903,11 @@ X(TIP_OCRCOPY, "复制文字  Ctrl+Shift+C", "複製文字  Ctrl+Shift+C", "Copy
   "Copiar texto  Ctrl+Shift+C")
 X(TIP_LONG, "长截图  Ctrl+L", "長截圖  Ctrl+L", "Scrolling capture  Ctrl+L", "スクロールキャプチャ  Ctrl+L", "스크롤 캡처  Ctrl+L",
   "Capture défilante  Ctrl+L", "Scrollaufnahme  Ctrl+L", "Captura con desplazamiento  Ctrl+L")
-/* in the property bar, but one of the commands (B_FRONT follows B_LONG) */
+/* in the property bar, but two of the commands (B_FRONT and B_BACK follow B_LONG) */
 X(TIP_FRONT, "置于顶层", "移到最上層", "Bring to front", "最前面へ移動", "맨 앞으로 가져오기", "Mettre au premier plan",
   "In den Vordergrund", "Traer al frente")
+X(TIP_BACK, "置于底层", "移到最下層", "Send to back", "最背面へ移動", "맨 뒤로 보내기", "Mettre à l'arrière-plan",
+  "In den Hintergrund", "Enviar al fondo")
 /* the three sizes */
 X(TIP_SIZE0, "细  (滚轮调节)", "細  (滾輪調整)", "Thin  (wheel to change)", "細い  (ホイールで調整)",
   "가늘게  (휠로 조절)", "Fin  (molette pour changer)", "Dünn  (Mausrad zum Ändern)", "Fino  (rueda para cambiar)")

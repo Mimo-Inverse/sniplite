@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: Version
-      placeholder: 1.5.0, installed or portable
+      placeholder: 1.5.1, installed or portable
     validations:
       required: true
   - type: input

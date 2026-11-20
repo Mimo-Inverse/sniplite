@@ -51,6 +51,7 @@
 #define OP_DEL                       1
 #define OP_EDIT                      2
 #define OP_FRONT                     3
+#define OP_BACK                      4
 #define B_UNDO                       20
 #define B_REDO                       21
 #define B_PIN                        22
@@ -60,8 +61,9 @@
 #define B_OCR                        26
 #define B_OCRCOPY                    27
 #define B_LONG                       28
-#define B_FRONT                      29    /* in the property bar */
-#define B_LAST                       B_FRONT /* the commands are B_UNDO .. B_LAST */
+#define B_FRONT                      29    /* in the property bar, with B_BACK */
+#define B_BACK                       30
+#define B_LAST                       B_BACK /* the commands are B_UNDO .. B_LAST */
 #define TB_ITEMS                     22    /* entries of kTbOrder, separators included; kTbPlain has two less */
 #define B_SIZE                       40
 #define B_COLOR                      50

@@ -2362,9 +2362,11 @@ FUNC on_button
         call redo
         jmp .Lob_refresh
 5:
-        cmp ebx, B_FRONT
-        jne 6f
-        call pick_front
+        lea eax, [rbx - B_FRONT]
+        cmp eax, B_BACK - B_FRONT
+        ja 6f
+        mov ecx, eax                    /* B_BACK: to the back */
+        call pick_order
         jmp .Lob_refresh
 6:
         cmp ebx, B_OCR

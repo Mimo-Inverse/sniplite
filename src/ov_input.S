@@ -602,8 +602,8 @@ FUNC on_lbutton_up
 ENDF
 
 /* void on_dblclick(POINT p): a text annotation opens for editing; elsewhere in the
- * selection (no tool, no annotation) copies like Enter; on the button of the tool in use
- * nothing; otherwise a press. */
+ * selection (no tool, no annotation but a spotlight) copies like Enter; on the button of
+ * the tool in use nothing; otherwise a press. */
 FUNC on_dblclick
         PUSHREG rbx                     /* p */
         ALLOC 32
@@ -631,6 +631,8 @@ FUNC on_dblclick
         movsxd rcx, eax
         imul rcx, rcx, AN_BYTES
         add rcx, qword ptr [rip + O + OV_ANN]
+        cmp dword ptr [rcx + AN_TOOL], T_SPOT
+        je .Ldc_none
         cmp dword ptr [rcx + AN_TOOL], T_TEXT
         jne .Ldc_down
         mov ecx, eax

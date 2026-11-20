@@ -401,8 +401,8 @@ FUNC ops_truncate
 ENDF
 
 /* bool op_push(int kind, int idx, Anno *a): records a step just done; *a (OP_DEL:
- * the removed annotation, OP_EDIT: the version before) is taken over, NULL for OP_ADD
- * and OP_FRONT */
+ * the removed annotation, OP_EDIT: the version before) is taken over, NULL for OP_ADD,
+ * OP_FRONT and OP_BACK */
 FUNC op_push
         PUSHREG rbx
         PUSHREG rsi
@@ -476,10 +476,8 @@ FUNC op_apply
         mov ecx, dword ptr [r8 + OPR_IDX]
         cmp eax, OP_EDIT
         je .Lap_edit
-        cmp eax, OP_FRONT
-        je .Lap_front
         cmp eax, OP_DEL
-        ja .Lap_ret
+        ja .Lap_order                   /* OP_FRONT, OP_BACK */
         movzx edx, dl
         cmp eax, edx                    /* insert: OP_ADD forward, OP_DEL back */
         lea rdx, [r8 + OPR_A]
@@ -500,13 +498,15 @@ FUNC op_apply
         movups xmmword ptr [r8 + OPR_A], xmm0
         movups xmmword ptr [r8 + OPR_A + 16], xmm1
         movups xmmword ptr [r8 + OPR_A + 32], xmm2
-.Lap_ret:
         ret
-.Lap_front:                             /* ann[idx] to the top; back, the top one to idx */
-        mov eax, dword ptr OV(OV_NANN)
-        dec eax
-        test dl, dl
-        mov edx, eax
+.Lap_order:                             /* ann[idx] to the top (OP_BACK: the bottom); back, from there to idx */
+        xor r9d, r9d
+        cmp eax, OP_BACK
+        je 1f
+        mov r9d, dword ptr OV(OV_NANN)
+        dec r9d
+1:      test dl, dl
+        mov edx, r9d
         jz list_move
         xchg ecx, edx
         jmp list_move
@@ -716,36 +716,48 @@ FUNC pick_delete
         ret
 ENDF
 
-/* void pick_front(void): the pick above every other annotation, one undo step; it
- * stays picked */
-FUNC pick_front
+/* void pick_order(bool back): the pick above every other annotation, or below them all;
+ * one undo step; it stays picked */
+        .if OP_BACK - OP_FRONT - 1
+        .error "OP_BACK follows OP_FRONT"
+        .endif
+FUNC pick_order
         PUSHREG rbx
+        PUSHREG rsi
+        PUSHREG rdi
         ALLOC 32
         ENDPROLOG
+        movzx edi, cl
         mov ebx, dword ptr OV(OV_PICK)
         test ebx, ebx
-        js .Lpf_ret
-        mov eax, dword ptr OV(OV_NANN)
-        dec eax
-        cmp ebx, eax
-        jge .Lpf_ret                    /* on top already */
-        mov ecx, OP_FRONT
+        js .Lord_ret
+        xor esi, esi                    /* where it goes */
+        test edi, edi
+        jnz 1f
+        mov esi, dword ptr OV(OV_NANN)
+        dec esi
+1:      cmp ebx, esi
+        je .Lord_ret                    /* there already */
+        lea ecx, [rdi + OP_FRONT]
         mov edx, ebx
         xor r8d, r8d
         call op_push
         test al, al
-        jz .Lpf_ret
+        jz .Lord_ret
         mov ecx, ebx
-        mov edx, dword ptr OV(OV_NANN)
-        dec edx
-        mov dword ptr OV(OV_PICK), edx
+        mov edx, esi
+        mov dword ptr OV(OV_PICK), esi
         inc dword ptr OV(OV_ACT_VER)
         call list_move
         add rsp, 32
+        pop rdi
+        pop rsi
         pop rbx
-        jmp canvas_rebuild              /* with all the others, which are below it now */
-.Lpf_ret:
+        jmp canvas_rebuild              /* what lies below it has changed */
+.Lord_ret:
         add rsp, 32
+        pop rdi
+        pop rsi
         pop rbx
         ret
 ENDF
@@ -787,7 +799,8 @@ FUNC seg_dist
         ret
 ENDF
 
-/* ove_hit: anno_hit for annotation rcx and the context at rdx -> eax = 0 / 1.
+/* ove_hit: anno_hit for annotation rcx and the context at rdx -> eax = 0 / 1, or 2
+ * inside a spotlight away from its edge.
  *
  * anno_hit first requires p inside anno_bounds inflated by S(4). Every shape test
  * but the ellipse's lies inside that box already (the margins of anno_bounds
@@ -828,6 +841,20 @@ FUNC ove_hit
         cmp eax, edx
         setl cl
         mov eax, ecx
+        jmp .Lh_ret
+
+.Lh_spot:                                       /* 1 near its edge, as a rectangle of width 0; */
+        CORNERS                                 /* 2 inside it, where anything else comes first */
+        MDIST
+        mov ecx, dword ptr [rsi + CX_S4]
+        mov edx, ecx
+        neg ecx
+        cmp eax, ecx
+        jl .Lh_no
+        xor ecx, ecx
+        cmp eax, edx
+        setge cl
+        lea eax, [rcx + 1]
         jmp .Lh_ret
 
 .Lh_mosaic:                                     /* in the rectangle inflated by S(2) */
@@ -1098,11 +1125,11 @@ ENDF
         .long .Lh_mosaic - .Lh_tab
         .long .Lh_text - .Lh_tab
         .long .Lh_number - .Lh_tab
-        .long .Lh_rect - .Lh_tab                /* T_SPOT: by its edge; what lies inside stays in reach */
+        .long .Lh_spot - .Lh_tab
         .long .Lh_mosaic - .Lh_tab              /* T_LENS */
 
 /* bool anno_hit(const Anno *a, POINT p): is p on the visible part of a? Outlines
- * (rectangle, ellipse) only count near the stroke. */
+ * (rectangle, ellipse) only count near the stroke, a spotlight near its edge. */
 FUNC anno_hit
         ALLOC 88
         ENDPROLOG
@@ -1110,16 +1137,19 @@ FUNC anno_hit
         CTX r8
         mov rdx, r8
         call ove_hit
+        cmp eax, 1
+        sete al
         add rsp, 88
         ret
 ENDF
 
 /* int anno_at(POINT p): the topmost annotation under p, -1 none. Only the part
- * inside the selection is visible. */
+ * inside the selection is visible. A spotlight is taken by its inside only where no
+ * other annotation is under p: what lies in it stays in reach. */
 FUNC anno_at
         PUSHREG rbx
         PUSHREG rsi
-        ALLOC 88
+        ALLOC 88                        /* [80]: the topmost spotlight p is inside */
         ENDPROLOG
         mov rdx, rcx
         mov rax, rcx
@@ -1143,12 +1173,27 @@ FUNC anno_at
         lea rdx, [rsp + 32]
         call ove_hit
         test eax, eax
-        jnz .Laa_found
+        jnz .Laa_hit
         sub rbx, AN_BYTES
         dec rsi
         jns .Laa_loop
 .Laa_none:
         mov eax, -1
+        jmp .Laa_ret
+.Laa_hit:
+        cmp eax, 1
+        je .Laa_found
+        mov dword ptr [rsp + 80], esi   /* in a spotlight: it is taken unless one below is hit */
+        jmp 2f
+1:      mov rcx, rbx
+        lea rdx, [rsp + 32]
+        call ove_hit
+        cmp eax, 1
+        je .Laa_found
+2:      sub rbx, AN_BYTES
+        dec rsi
+        jns 1b
+        mov eax, dword ptr [rsp + 80]
         jmp .Laa_ret
 .Laa_found:
         mov eax, esi

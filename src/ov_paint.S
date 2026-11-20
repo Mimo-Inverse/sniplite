@@ -60,10 +60,10 @@
 /* draw.h icons */
 #define DIC_RECT 0
 #define DIC_UNDO 11
-/* what the property bar holds (VIS_PB_RUNS): runs of buttons, in this order */
+/* what the property bar holds (VIS_PB_RUNS): runs of buttons */
 #define PB_SIZES 1
 #define PB_COLORS 2
-#define PB_FRONT 4                      /* "to the front": no tool, an annotation picked */
+#define PB_ORDER 4                      /* "to the front", "to the back", at the left: an annotation is picked */
 /* present.h parts */
 #define PR_TOP 0
 #define PR_LABEL 1
@@ -180,7 +180,7 @@ ovp_scale_key:
 .Lrad:          .space 12               /* the size discs' radii: rad[i] * O.s */
 .Ltw:           .space 4                /* tool bar width */
 .Lth:           .space 4                /* bar height */
-.Lpw:           .space 4 * PB_FRONT * 2 /* property bar width by what it holds (PB_*); 0: no bar */
+.Lpw:           .space 4 * PB_ORDER * 2 /* property bar width by what it holds (PB_*); 0: no bar */
 .Lmag_w:        .space 4
 .Lmag_h:        .space 4
 /* measured text widths: valid for one font (handle, scale), measuring DC and language */
@@ -368,13 +368,13 @@ SFUNC scale_tab
         jz 4f
         lea eax, [rax + rcx*8]
         add eax, dword ptr [rip + .Ls9]
-4:      test edx, PB_FRONT
+4:      test edx, PB_ORDER
         jz 5f
-        add eax, ecx
+        lea eax, [rax + rcx*2]
         add eax, dword ptr [rip + .Ls9]
 5:      mov dword ptr [r8 + rdx*4], eax
         inc edx
-        cmp edx, PB_FRONT * 2
+        cmp edx, PB_ORDER * 2
         jb 2b
         mov eax, dword ptr Ov(OV_S)
         mov dword ptr [rip + .Lst_key], eax
@@ -945,7 +945,7 @@ SFUNC tip_text
 ENDF
 
 /* eax = what the property bar holds (PB_*), ecx = the picked annotation's tool, else
- * O.tool: the runs of that tool's bar, and with no tool "to the front" for the pick. Leaf. */
+ * O.tool: the runs of that tool's bar, and for a pick the two that restack it. Leaf. */
 SFUNC pb_runs
         ENDPROLOG
         mov ecx, dword ptr Ov(OV_TOOL)
@@ -954,13 +954,11 @@ SFUNC pb_runs
         js 1f
         imul rax, rax, AN_BYTES
         add rax, qword ptr Ov(OV_ANN)
-        test ecx, ecx
         mov ecx, dword ptr [rax + AN_TOOL]
         lea rax, [rip + .Lpb_of]
         movzx eax, byte ptr [rax + rcx]
-        jnz 2f
-        or eax, PB_FRONT
-2:      ret
+        or eax, PB_ORDER
+        ret
 1:      lea rax, [rip + .Lpb_of]
         movzx eax, byte ptr [rax + rcx]
         ret
@@ -1062,8 +1060,13 @@ FUNC tb_items
         add r8d, r11d
         add r9d, r11d
         lea r12d, [r9 + r10]
-        mov eax, dword ptr [rbx + VIS_PB_RUNS]  /* each run, then a separator's room */
-        test al, PB_SIZES
+        mov eax, dword ptr [rbx + VIS_PB_RUNS]  /* each run, a separator's room between two */
+        test al, PB_ORDER
+        jz 2f
+        TB_ITEM B_FRONT
+        TB_ITEM B_BACK
+        add r8d, dword ptr [rip + .Ls9]
+2:      test al, PB_SIZES
         jz 4f
         mov edx, B_SIZE
 3:      TB_ITEM edx
@@ -1072,16 +1075,12 @@ FUNC tb_items
         jb 3b
         add r8d, dword ptr [rip + .Ls9]
 4:      test al, PB_COLORS
-        jz 6f
+        jz .Lti_count
         mov edx, B_COLOR
 5:      TB_ITEM edx
         inc edx
         cmp edx, B_COLOR + 8
         jb 5b
-        add r8d, dword ptr [rip + .Ls9]
-6:      test al, PB_FRONT
-        jz .Lti_count
-        TB_ITEM B_FRONT
 .Lti_count:
         mov rax, rsi                            /* (end - it) / ITEM_BYTES */
         sub rax, qword ptr [rsp + 32]
@@ -1549,17 +1548,21 @@ FUNC place_toolbar
         and eax, 0x7F
         shl rax, 26
         or rsi, rax
-        test byte ptr [rbx + VIS_PB_RUNS], PB_FRONT     /* bit 33: the pick can go to the front */
+        test byte ptr [rbx + VIS_PB_RUNS], PB_ORDER     /* bits 33, 34: the pick can go to the front, to the back */
         jz 14f
         cmp byte ptr Ov(OV_TE_ON), 0
         jne 14f
         mov eax, dword ptr Ov(OV_NANN)
         dec eax
-        cmp dword ptr Ov(OV_PICK), eax
-        jge 14f
+        mov ecx, dword ptr Ov(OV_PICK)
+        cmp ecx, eax
+        jge 15f
         bts rsi, 33
+15:     test ecx, ecx
+        jle 14f
+        bts rsi, 34
 14:     movsxd rax, r12d
-        shl rax, 34
+        shl rax, 35
         or rsi, rax
         mov qword ptr [rbx + VIS_TB_KEY], rsi
         add rsp, 896
@@ -1867,8 +1870,8 @@ ENDF
 
 /* rax = what toolbar item ecx looks like under tb_key rdx (equal values: equal pixels,
  * for the same bars). Leaf; clobbers r8-r11. */
-        .if B_UNDO + 4 != 24 || B_REDO + 4 != 25 || B_FRONT + 4 != 33
-        .error "the key bits of undo, redo and front are their ids + 4"
+        .if B_UNDO + 4 != 24 || B_REDO + 4 != 25 || B_FRONT + 4 != 33 || B_BACK + 4 != 34
+        .error "the key bits of undo, redo, front and back are their ids + 4"
         .endif
 SFUNC item_look
         ENDPROLOG
@@ -1888,11 +1891,11 @@ SFUNC item_look
         cmp ecx, eax
         jne 2f
         mov r8d, 1
-2:      xor r9d, r9d                            /* disabled: undo, redo, front without their bit, id + 4 */
+2:      xor r9d, r9d                            /* disabled: undo, redo, front, back without their bit, id + 4 */
         lea eax, [rcx - B_UNDO]
-        cmp eax, B_FRONT - B_UNDO
+        cmp eax, B_BACK - B_UNDO
         ja 10f
-        mov r10d, 1 << (B_UNDO - B_UNDO) | 1 << (B_REDO - B_UNDO) | 1 << (B_FRONT - B_UNDO)
+        mov r10d, 1 << (B_UNDO - B_UNDO) | 1 << (B_REDO - B_UNDO) | 1 << (B_FRONT - B_UNDO) | 1 << (B_BACK - B_UNDO)
         bt r10d, eax
         jnc 10f
         lea eax, [rcx + 4]
@@ -1931,7 +1934,7 @@ SFUNC item_look
         shl r11d, 5
         or eax, r11d
         mov r11, rdx
-        shr r11, 34
+        shr r11, 35
         cmp r11, T_MOSAIC
         jne 9f
         or eax, 0x10
@@ -4493,9 +4496,13 @@ FUNC draw_toolbar
         cmp eax, dword ptr Ov(OV_NOPS_ALL)
         jl 4f
         mov r13d, 1
-4:      cmp ebp, B_FRONT
-        jne 16f
-        bt qword ptr [rsi + VIS_TB_KEY], 33     /* the pick can go to the front */
+4:      cmp ebp, B_FRONT                        /* front, back: the key's bit, id + 4, says the pick can go there */
+        jb 16f
+        cmp ebp, B_BACK
+        ja 16f
+        lea eax, [rbp + 4]
+        mov rcx, qword ptr [rsi + VIS_TB_KEY]
+        bt rcx, rax
         jc 16f
         mov r13d, 1
 16:     lea rcx, [rsp + DT_TMP]                 /* in = rect_inflate(r, -S(2)) */
@@ -4658,7 +4665,7 @@ FUNC draw_toolbar
         call d_frame
         mov ecx, dword ptr Ov(OV_TIP)
         mov rdx, qword ptr [rsi + VIS_TB_KEY]
-        shr rdx, 34                             /* the property bar's tool */
+        shr rdx, 35                             /* the property bar's tool */
         call tip_text
         mov r8, rax
         lea rcx, [rsp + DT_B]
