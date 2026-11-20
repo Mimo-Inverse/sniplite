@@ -25,9 +25,9 @@
 ## Features
 
 - **Fast**: press F1 and the screenshot is there, sooner than in 99% of screenshot tools
-- **Light**: about 280 KB, nothing else to install; the capture and drawing core is written in assembly
+- **Light**: about 320 KB, nothing else to install; the capture and drawing core is written in assembly
 - **Pins**: pin a screenshot on top of every other window, so it stays in view while you work
-- **Complete**: screenshots, pins, arrows, text, mosaic: it is all there
+- **Complete**: screenshots, pins, arrows, text, mosaic, spotlight, magnifier: it is all there
 - **Text recognition**: read the text in a capture, tables included; an optional module that runs entirely on your computer
 - **Long screenshots**: scroll a page and it is stitched together as you go
 - **Clean**: no ads, open source, no logs, no data collected
@@ -95,13 +95,21 @@ Select an area and click the text button (Ctrl+O): the text appears in a panel b
 
 Select the area, click the long screenshot button (Ctrl+L) and scroll the page yourself. sniplite stitches what scrolls by, and a strip beside the area shows the result so far. Enter copies it and Esc cancels; you can also save it, pin it or read its text.
 
+**Where are my captures saved?**
+
+Ctrl+S opens the save dialog in the folder you last saved to; the first time, or if that folder is gone, in the default save location if you changed it, else in Pictures. Quick captures (Shift+F1) go straight into the default save location, which is the desktop until you change it on the Capture page of Settings. Tick "Also save each capture as a file" there, and every capture you copy or pin goes into that folder too. Under File name format, on the same page, you pick how the files are named, from a few patterns with the date and time.
+
+**What if the hotkeys get in the way of a game?**
+
+On the Hotkeys page of Settings, tick "Leave the hotkeys to full-screen apps (like games)": while a program that fills its screen is in front, sniplite lets go of its hotkeys and the keys reach that program; they come back when you switch away. Programs that do not run full screen can be added under "Leave the hotkeys to": click Manage, then New to type a file name such as `game.exe`, or Browse to pick the program.
+
 **How much memory does it use?**
 
 About 50 MB most of the time, nearly all of it held by the graphics driver, and a little more right after a capture. To use less, choose Low memory on the Capture page of Settings: about 2 MB, with slower captures.
 
 **What does it leave on my computer?**
 
-It needs no administrator rights and does not touch the registry. Changing a setting creates one settings file; delete it to get the defaults back.
+It needs no administrator rights and does not touch the registry. Changing a setting, or saving through the save dialog (it remembers the folder), creates one settings file; delete it to get the defaults back.
 
 **How do I change the language?**
 
@@ -109,7 +117,7 @@ sniplite follows the language of Windows. To use another, open Settings from the
 
 **How do I update?**
 
-Once a day sniplite asks GitHub whether there is a newer version. If there is, a notification appears at the bottom right, and one click updates. Only the version number is checked and nothing is uploaded; you can turn this off in Settings.
+Once a day sniplite asks GitHub whether there is a newer version. If there is, a notification appears at the bottom right, and one click updates. Only the version number is checked and nothing is uploaded; you can turn this off in Settings. The portable versions do not look for updates: get the new one from [Releases](https://github.com/MrTangLuyao/sniplite/releases/latest).
 
 **How do I uninstall it?**
 
@@ -133,8 +141,9 @@ Install [w64devkit](https://github.com/skeeto/w64devkit) (or another MinGW-w64),
 
 ## Third-party open source
 
-sniplite itself uses nothing but the system libraries of Windows. The optional text recognition module is the work of others, passed on unchanged with their licenses (they are in the module's `ocr` folder and on the [module's release page](https://github.com/MrTangLuyao/sniplite/releases/tag/ocr-1)):
+sniplite itself uses nothing but the system libraries of Windows. The optional text recognition module is the work of others, passed on unchanged with their licenses (they, or links to them, are in the module's `ocr` folder and on the [module's release page](https://github.com/MrTangLuyao/sniplite/releases/tag/ocr-2)):
 
 - [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.26.0, Copyright (c) Microsoft Corporation, MIT License
+- The [Microsoft Visual C++](https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files) runtime 14.51.36247 that ONNX Runtime needs (`msvcp140.dll`, `msvcp140_1.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`), Copyright (c) Microsoft Corporation, not open source: redistributed under Microsoft's [license terms](https://visualstudio.microsoft.com/license-terms/)
 - The PP-OCRv6 models of [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), Copyright (c) PaddlePaddle Authors, Apache License 2.0
 - Their ONNX form comes from [RapidOCR](https://github.com/RapidAI/RapidOCR), Apache License 2.0

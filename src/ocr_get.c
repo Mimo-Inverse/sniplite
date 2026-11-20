@@ -1,6 +1,8 @@
 /* Getting the text recognition module: the files of the "ocr" folder next to the program.
  *
  *   onnxruntime.dll                                  ONNX Runtime 1.26.0
+ *   vcruntime140.dll, vcruntime140_1.dll,            the Visual C++ runtime that DLL needs: the
+ *   msvcp140_1.dll, msvcp140.dll                     computer may have none, or too old a one
  *   PP-OCRv6_det_tiny.onnx, PP-OCRv6_rec_tiny.onnx   the PP-OCRv6 models of PaddleOCR, as
  *                                                    RapidOCR converted them
  *   NOTICE.txt and the licenses                      whose work these are
@@ -8,19 +10,24 @@
  * They travel as one zip (pack.bat makes it). Settings downloads it from this project's
  * own releases, where it is published once under a tag of its own; the portable program
  * with OCR has it after itself in its own file. Either way the same code takes it apart:
- * each of the three files is checked against the SHA-256 written below before it gets
- * its name, so what is installed is exactly what this version of the program was tested
- * with, and nothing but those three and text files is written.
+ * each of the seven that are not text is checked against the SHA-256 written below before
+ * it gets its name, so what is installed is exactly what this version of the program was
+ * tested with, and nothing but those seven and the four texts named below is written.
  *
  * Runs in the preferences window's process, on a worker thread, or in the helper that
- * reads text (the carried zip, the first time). */
+ * reads text (the carried zip, the first time; the runtime files a module lacks). */
 #include "ocr.h"
 #include "update.h"
 
 /* The published zip. Its size is known here: for the progress, and nothing else is taken.
- * A changed module is published under a new tag, with its size and the hashes below. */
-#define MODULE_PATH UPDATE_REPO L"/releases/download/ocr-1/sniplite_ocr.zip"
-#define MODULE_BYTES 11651861u
+ * A changed module is published under a new tag, with both sizes and the hashes below. */
+#define MODULE_TAG UPDATE_REPO L"/releases/download/ocr-2/"
+#define MODULE_PATH MODULE_TAG L"sniplite_ocr.zip"
+#define MODULE_BYTES 11985367u
+/* Beside it, the runtime files by themselves: for a module from before they came with it. */
+#define RUNTIME_PATH MODULE_TAG L"sniplite_ocr_runtime.zip"
+#define RUNTIME_BYTES 334232u
+#define RUNTIME_PARTS 4 /* the last of kParts */
 
 typedef struct {
     const WCHAR *name;
@@ -38,7 +45,22 @@ static const Part kParts[] = {
     {L"onnxruntime.dll", 16783672,
      {0xef, 0xa1, 0x4d, 0xc0, 0xf3, 0xe8, 0xd6, 0xe4, 0xfc, 0x7c, 0xe0, 0xb9, 0xb5, 0xaa, 0x70, 0xd6,
       0xe2, 0x7d, 0xee, 0xc9, 0x08, 0xaf, 0x05, 0xc1, 0xfa, 0x9a, 0x37, 0x27, 0x0f, 0x57, 0x46, 0x0b}},
+    {L"vcruntime140.dll", 178616,
+     {0xd1, 0xf4, 0x22, 0x5d, 0xf2, 0xcd, 0x87, 0x7d, 0xbf, 0x13, 0x0d, 0x56, 0x68, 0xa0, 0x21, 0xdc,
+      0xe3, 0xf9, 0x41, 0x18, 0x45, 0x5f, 0xf5, 0xec, 0x95, 0x20, 0x61, 0xc3, 0x0a, 0xfc, 0x9c, 0xe7}},
+    {L"vcruntime140_1.dll", 50112,
+     {0xa7, 0x14, 0x6c, 0x08, 0xf8, 0x9f, 0xe5, 0xb0, 0x45, 0x41, 0xab, 0x50, 0x7c, 0xdb, 0x59, 0xff,
+      0x7b, 0x44, 0x53, 0x4d, 0x4b, 0xa3, 0xc6, 0x68, 0xa4, 0x26, 0xc6, 0x45, 0x0a, 0x03, 0x43, 0x4e}},
+    {L"msvcp140_1.dll", 35768,
+     {0x20, 0x6c, 0x93, 0x1b, 0xf9, 0x0f, 0xda, 0xd8, 0x81, 0x6d, 0xe3, 0xb5, 0xe2, 0xef, 0x80, 0xb2,
+      0xbc, 0xaa, 0x94, 0x06, 0xc8, 0x9e, 0xcc, 0x05, 0xfe, 0x6f, 0xdd, 0xff, 0xe2, 0x51, 0xe9, 0x82}},
+    {L"msvcp140.dll", 643512,
+     {0x7c, 0x26, 0x61, 0x4e, 0x1d, 0x73, 0x38, 0x92, 0xc2, 0xde, 0xac, 0x7e, 0x24, 0x5c, 0xe1, 0x15,
+      0x50, 0x4b, 0x1d, 0x80, 0x59, 0x2d, 0xd0, 0xa0, 0x1b, 0x08, 0xe3, 0xe5, 0xa5, 0x5f, 0x89, 0xca}},
 };
+
+static const WCHAR *const kNotes[] = {L"NOTICE.txt", L"LICENSE-onnxruntime.txt", L"LICENSE-PaddleOCR.txt",
+                                      L"ThirdPartyNotices-onnxruntime.txt"};
 
 /* ---- SHA-256 ---- */
 
@@ -322,8 +344,8 @@ static bool file_write(const WCHAR *name, const uint8_t *data, uint32_t n)
 
 /* The zip, whole in memory, taken apart into the module's folder: OCR_GET_OK, _CHECK or
  * _WRITE. A zip is read from its end, where its directory is (no comment after it: pack.bat
- * writes none). Only plain files right in "ocr/" are looked at: the module's three, each
- * with the size and the SHA-256 it must have, and text files (the notice, the licenses).
+ * writes none). Only plain files right in "ocr/" are looked at: the module's own, each
+ * with the size and the SHA-256 it must have, and its four texts (the notice, the licenses).
  * Nothing else is written, so nothing can land outside the folder or be loaded from it. */
 static int zip_unpack(const uint8_t *zip, size_t n)
 {
@@ -357,10 +379,13 @@ static int zip_unpack(const uint8_t *zip, size_t n)
             continue; /* the folder's own entry, or something not expected here */
         file[nlen - 4] = 0;
         const Part *part = NULL;
+        bool note = false;
         for (int k = 0; k < COUNTOF(kParts); k++)
             if (!lstrcmpiW(file, kParts[k].name))
                 part = &kParts[k];
-        if (!part && (nlen < 8 || lstrcmpiW(file + nlen - 8, L".txt")))
+        for (int k = 0; k < COUNTOF(kNotes); k++)
+            note |= !lstrcmpiW(file, kNotes[k]);
+        if (!part && !note)
             continue;
         if ((part && usize != part->size) || (uint64_t)at + 30 > dir_at || rd32(zip + at) != 0x04034b50)
             return OCR_GET_CHECK;
@@ -389,7 +414,7 @@ static int zip_unpack(const uint8_t *zip, size_t n)
 
 typedef struct {
     uint8_t *buf;
-    uint32_t have;
+    uint32_t have, total;
     volatile LONG *cancel;
     void (*progress)(int, void *);
     void *ctx;
@@ -399,26 +424,32 @@ typedef struct {
 static bool fetch_sink(const void *data, DWORD n, void *ctx)
 {
     Fetch *f = ctx;
-    if (*f->cancel || n > MODULE_BYTES - f->have)
+    if (*f->cancel || n > f->total - f->have)
         return false; /* given up, or not the file that was published */
     memcpy(f->buf + f->have, data, n);
     f->have += n;
-    int pct = (int)((uint64_t)f->have * 100 / MODULE_BYTES);
+    int pct = (int)((uint64_t)f->have * 100 / f->total);
     if (pct != f->shown && f->progress)
         f->progress(f->shown = pct, f->ctx);
     return true;
 }
 
-int ocr_get(volatile LONG *cancel, void (*progress)(int percent, void *ctx), void *ctx)
+/* one of the published zips, which has that many bytes, into the module's folder */
+static int get(const WCHAR *path, uint32_t bytes, volatile LONG *cancel, void (*progress)(int percent, void *ctx), void *ctx)
 {
-    Fetch f = {mem_alloc(MODULE_BYTES), 0, cancel, progress, ctx, -1};
+    Fetch f = {mem_alloc(bytes), 0, bytes, cancel, progress, ctx, -1};
     DWORD status;
     if (!f.buf)
         return OCR_GET_WRITE;
-    bool whole = http_fetch(UPDATE_HOST, MODULE_PATH, NULL, &status, fetch_sink, &f) && f.have == MODULE_BYTES;
+    bool whole = http_fetch(UPDATE_HOST, path, NULL, &status, fetch_sink, &f) && f.have == bytes;
     int result = *cancel ? OCR_GET_CANCEL : !whole ? OCR_GET_NET : zip_unpack(f.buf, f.have);
     mem_free(f.buf);
     return result;
+}
+
+int ocr_get(volatile LONG *cancel, void (*progress)(int percent, void *ctx), void *ctx)
+{
+    return get(MODULE_PATH, MODULE_BYTES, cancel, progress, ctx);
 }
 
 /* ---- carried by the program itself ----
@@ -490,31 +521,56 @@ bool ocr_unpack(void)
     return ok;
 }
 
+/* ---- completed ----
+ *
+ * A module from before the runtime files came with it loads only where the computer has that
+ * runtime, and one new enough. Where it does not load, the files are added: out of the
+ * program's own file when that carries the module, else an installed copy downloads the small
+ * zip. A portable program that does not carry the module fetches nothing, here as in Settings.
+ * Both zips have msvcp140.dll as the last of the four: old files mixed with new ones load only
+ * when that one is new (measured), so a set cut short stays one that does not load, and is
+ * completed the next time. */
+
+/* all four, each of the size it must have: another version, put there by hand, does not count */
+static bool runtime_there(void)
+{
+    WCHAR path[MAX_PATH * 2];
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    for (int i = COUNTOF(kParts) - RUNTIME_PARTS; i < COUNTOF(kParts); i++)
+        if (!part_path(kParts[i].name, L"", path, COUNTOF(path)) || !GetFileAttributesExW(path, GetFileExInfoStandard, &fa) ||
+            fa.nFileSizeHigh || fa.nFileSizeLow != kParts[i].size)
+            return false;
+    return true;
+}
+
+bool ocr_mend(void)
+{
+    static volatile LONG never;
+    if (!ocr_installed() || runtime_there())
+        return false; /* no module to complete, or something else keeps it from loading */
+    if (ocr_packed())
+        return ocr_unpack();
+    return update_installed_copy() && get(RUNTIME_PATH, RUNTIME_BYTES, &never, NULL, NULL) == OCR_GET_OK;
+}
+
 /* ---- removed ---- */
 
 bool ocr_remove(void)
 {
     WCHAR dir[MAX_PATH * 2], path[MAX_PATH * 2];
     ocr_dir(dir, COUNTOF(dir));
-    bool ok = true;
-    for (int i = 0; i < COUNTOF(kParts); i++) {
+    for (int i = COUNTOF(kParts) - 1; i >= 0; i--) { /* the DLLs first: a helper still there holds them, and then nothing goes */
         if (part_path(kParts[i].name, L"", path, COUNTOF(path)) && !DeleteFileW(path) && GetLastError() != ERROR_FILE_NOT_FOUND &&
             GetLastError() != ERROR_PATH_NOT_FOUND) /* neither the file nor the folder there: nothing to remove */
-            ok = false;
+            return false;
         if (part_path(kParts[i].name, L".part", path, COUNTOF(path)))
             DeleteFileW(path);
     }
-    WIN32_FIND_DATAW fd; /* the notice and the licenses that came with them */
-    HANDLE find = part_path(L"*.txt", L"", path, COUNTOF(path)) ? FindFirstFileW(path, &fd) : INVALID_HANDLE_VALUE;
-    if (find != INVALID_HANDLE_VALUE) {
-        do {
-            if (part_path(fd.cFileName, L"", path, COUNTOF(path)))
-                DeleteFileW(path);
-        } while (FindNextFileW(find, &fd));
-        FindClose(find);
-    }
+    for (int i = 0; i < COUNTOF(kNotes); i++)
+        if (part_path(kNotes[i], L"", path, COUNTOF(path)))
+            DeleteFileW(path);
     RemoveDirectoryW(dir); /* stays when something else is in it */
-    return ok;
+    return true;
 }
 
 int ocr_size_mb(void)

@@ -348,6 +348,23 @@ FUNC list_remove
         ret
 ENDF
 
+/* void list_move(int from, int to): ann[from] becomes ann[to]. The list has room for
+ * the one it just lost, so the insert cannot fail. */
+FUNC list_move
+        PUSHREG rbx
+        ALLOC 80                        /* Anno at 32 */
+        ENDPROLOG
+        mov ebx, edx
+        lea rdx, [rsp + 32]
+        call list_remove
+        mov ecx, ebx
+        lea rdx, [rsp + 32]
+        call list_insert
+        add rsp, 80
+        pop rbx
+        ret
+ENDF
+
 /* void ops_truncate(int n): drop the redoable steps from n on */
 FUNC ops_truncate
         PUSHREG rbx
@@ -384,7 +401,8 @@ FUNC ops_truncate
 ENDF
 
 /* bool op_push(int kind, int idx, Anno *a): records a step just done; *a (OP_DEL:
- * the removed annotation, OP_EDIT: the version before) is taken over, NULL for OP_ADD */
+ * the removed annotation, OP_EDIT: the version before) is taken over, NULL for OP_ADD
+ * and OP_FRONT */
 FUNC op_push
         PUSHREG rbx
         PUSHREG rsi
@@ -458,6 +476,8 @@ FUNC op_apply
         mov ecx, dword ptr [r8 + OPR_IDX]
         cmp eax, OP_EDIT
         je .Lap_edit
+        cmp eax, OP_FRONT
+        je .Lap_front
         cmp eax, OP_DEL
         ja .Lap_ret
         movzx edx, dl
@@ -482,6 +502,14 @@ FUNC op_apply
         movups xmmword ptr [r8 + OPR_A + 32], xmm2
 .Lap_ret:
         ret
+.Lap_front:                             /* ann[idx] to the top; back, the top one to idx */
+        mov eax, dword ptr OV(OV_NANN)
+        dec eax
+        test dl, dl
+        mov edx, eax
+        jz list_move
+        xchg ecx, edx
+        jmp list_move
 ENDF
 
 /* void annos_reset(void) */
@@ -628,6 +656,7 @@ FUNC commit_anno
         jz .Lca_top
         mov dword ptr OV(OV_PICK), edi
         inc dword ptr OV(OV_ACT_VER)
+        call canvas_cover_pick
         jmp .Lca_ret
 .Lca_top:
         add rsp, 32
@@ -636,6 +665,9 @@ FUNC commit_anno
         pop rbx
         jmp canvas_add_top
 .Lca_fail:
+        lea rax, OV(OV_ACT)             /* the one being drawn is given up */
+        cmp rbx, rax
+        je .Lca_drop
         AFREE rbx
 .Lca_ret:
         add rsp, 32
@@ -643,6 +675,12 @@ FUNC commit_anno
         pop rsi
         pop rbx
         ret
+.Lca_drop:
+        add rsp, 32
+        pop rdi
+        pop rsi
+        pop rbx
+        jmp act_drop
 ENDF
 
 /* void pick_delete(void) */
@@ -661,14 +699,53 @@ FUNC pick_delete
         mov ecx, OP_DEL
         mov edx, ebx
         lea r8, [rsp + 32]
+        cmp ebx, dword ptr OV(OV_NANN)  /* rebuilt if some were above it (drawn live) */
+        setl bl
+        cmp dword ptr [r8 + AN_TOOL], T_SPOT    /* or it was a spotlight (the dim layer) */
+        sete al
+        or bl, al
         call op_push
-        cmp ebx, dword ptr OV(OV_NANN)
-        jge .Lpd_ret                    /* the ones above it were drawn live */
+        test bl, bl
+        jz .Lpd_ret
         add rsp, 80
         pop rbx
         jmp canvas_rebuild
 .Lpd_ret:
         add rsp, 80
+        pop rbx
+        ret
+ENDF
+
+/* void pick_front(void): the pick above every other annotation, one undo step; it
+ * stays picked */
+FUNC pick_front
+        PUSHREG rbx
+        ALLOC 32
+        ENDPROLOG
+        mov ebx, dword ptr OV(OV_PICK)
+        test ebx, ebx
+        js .Lpf_ret
+        mov eax, dword ptr OV(OV_NANN)
+        dec eax
+        cmp ebx, eax
+        jge .Lpf_ret                    /* on top already */
+        mov ecx, OP_FRONT
+        mov edx, ebx
+        xor r8d, r8d
+        call op_push
+        test al, al
+        jz .Lpf_ret
+        mov ecx, ebx
+        mov edx, dword ptr OV(OV_NANN)
+        dec edx
+        mov dword ptr OV(OV_PICK), edx
+        inc dword ptr OV(OV_ACT_VER)
+        call list_move
+        add rsp, 32
+        pop rbx
+        jmp canvas_rebuild              /* with all the others, which are below it now */
+.Lpf_ret:
+        add rsp, 32
         pop rbx
         ret
 ENDF
@@ -729,7 +806,7 @@ FUNC ove_hit
         test r8d, r8d
         jle .Lh_ret
         mov ecx, dword ptr [rbx + AN_TOOL]
-        cmp ecx, T_NUMBER
+        cmp ecx, T_LAST
         ja .Lh_ret
         mov rdi, qword ptr [rbx + AN_PT]        /* p0 */
         lea r12, [rdi + r8*8 - 8]               /* p1 */
@@ -1021,6 +1098,8 @@ ENDF
         .long .Lh_mosaic - .Lh_tab
         .long .Lh_text - .Lh_tab
         .long .Lh_number - .Lh_tab
+        .long .Lh_rect - .Lh_tab                /* T_SPOT: by its edge; what lies inside stays in reach */
+        .long .Lh_mosaic - .Lh_tab              /* T_LENS */
 
 /* bool anno_hit(const Anno *a, POINT p): is p on the visible part of a? Outlines
  * (rectangle, ellipse) only count near the stroke. */
@@ -1100,6 +1179,8 @@ FUNC pick_handles
         je .Lph_box
         cmp eax, T_MOSAIC
         je .Lph_box
+        cmp eax, T_SPOT                 /* and the magnifier */
+        jae .Lph_box
 .Lph_none:
         xor eax, eax
         ret
@@ -1246,8 +1327,8 @@ FUNC pick_grab_at
         ret
 ENDF
 
-/* bool pick_body_has(POINT p): with no tool, a picked annotation (not a line) can
- * also be dragged by its inside: p in its bounds and in the selection */
+/* bool pick_body_has(POINT p): with no tool (asked only then), a picked annotation
+ * (not a line) can also be dragged by its inside: p in its bounds and in the selection */
 FUNC pick_body_has
         PUSHREG rbx
         ALLOC 48
@@ -1256,8 +1337,6 @@ FUNC pick_body_has
         movsxd rdx, dword ptr OV(OV_PICK)
         test edx, edx
         js .Lpb_ret
-        cmp dword ptr OV(OV_TOOL), T_NONE
-        jne .Lpb_ret
         ANNP r8, rdx
         mov r9d, dword ptr [r8 + AN_TOOL]
         sub r9d, T_LINE
@@ -1947,6 +2026,9 @@ FUNC prop_size_idx
         mov ecx, T_TEXT
         mov r8d, dword ptr OV(OV_TE_PX)
 .Lpz_find:
+        lea eax, [r8 - LENS_Z0]         /* the magnifier's size is its factor: 2, 3 or 4 */
+        cmp ecx, T_LENS
+        je .Lpz_ret
         TOOLTAB rdx, ecx, r9
         TOOLPX eax, [rdx], xmm0, xmm1
         sub eax, r8d
@@ -2028,6 +2110,9 @@ FUNC pick_style
         test ecx, ecx
         js .Lst_color
         movsxd rcx, ecx
+        lea esi, [rcx + LENS_Z0]        /* the magnifier: its factor */
+        cmp r8d, T_LENS
+        je .Lst_color
         TOOLTAB r9, r8d, r10
         TOOLPX esi, [r9+rcx*4], xmm0, xmm1
 .Lst_color:

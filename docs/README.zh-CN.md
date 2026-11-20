@@ -10,7 +10,7 @@
 
 [![版本](https://img.shields.io/github/v/tag/MrTangLuyao/sniplite?sort=date&label=%E7%89%88%E6%9C%AC&style=flat-square&color=1677e5)](https://github.com/MrTangLuyao/sniplite/releases) [![系统](https://img.shields.io/badge/%E7%B3%BB%E7%BB%9F-Windows%2010%20%2F%2011-3b82f6?style=flat-square)](#下载) [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-MIT-3b82f6?style=flat-square)](../LICENSE)
 
-[**下载**](#下载) · [默认快捷键](#默认快捷键) · [常见问题](#常见问题)
+[**下载**](#下载) | [默认快捷键](#默认快捷键) | [常见问题](#常见问题)
 
 <img src="../pics/zh/demo-edit.png" alt="框选一块区域，直接在上面画圈、箭头、文字和序号" width="66%">
 <br>
@@ -25,9 +25,9 @@
 ## 特色
 
 - **快**：按F1截图 领先99%截图软件的截图速度
-- **轻**：本体约280KB，无需安装任何运行库，截图和绘图的核心代码用汇编编写
+- **轻**：本体约320KB，无需安装任何运行库，截图和绘图的核心代码用汇编编写
 - **能贴图**：把截图钉在屏幕最上层，切到别的窗口也挡不住，对照着看很方便
-- **够用**：功能全面，截图，贴图，箭头，文字，马赛克 样样都有
+- **够用**：功能全面，截图，贴图，箭头，文字，马赛克，聚光灯，放大镜 样样都有
 - **能识字**：截图里的文字和表格都能识别出来，模块可选，全部在本机完成
 - **长截图**：自己滚动页面，边滚边自动拼接
 - **干净**：没有广告，开源，无日志，不收集数据
@@ -95,13 +95,21 @@
 
 框选区域，点长截图按钮（Ctrl+L），然后自己滚动页面。sniplite 会把滚过的内容自动拼起来，旁边的预览条显示已经拼好的部分。按 Enter 复制，按 Esc 取消，也可以保存、贴图或者识别其中的文字。
 
+**截图保存在哪里？**
+
+按 Ctrl+S 时，保存对话框会打开上次保存的文件夹；第一次保存，或者那个文件夹不在了，就打开你改过的默认保存位置，没改过就打开“图片”文件夹。快速截屏（Shift+F1）直接存到默认保存位置，没改过就是桌面，可以在首选项的截屏页里更改。在那里勾选“截图时同时保存文件”，复制或贴图的截图也会同时存一份到这个文件夹。同一页的“文件名格式”一栏可以选文件怎么命名，有几种日期时间格式。
+
+**快捷键和游戏冲突怎么办？**
+
+在首选项的控制页勾选“全屏程序（如游戏）在前台时让出快捷键”后，只要占满屏幕的程序在前台，sniplite 就会暂时放开快捷键，按键直接交给那个程序，切走后再拿回来。不是全屏运行的程序，可以加到“让出快捷键的程序”里：点“管理”，用“新建”填程序的文件名（比如 `game.exe`），或者用“浏览”直接选中程序。
+
 **占多少内存？**
 
 平时大约 50 MB，主要是显卡驱动占的，刚截完图会短暂多占一些。想更省的话，可以在首选项的截屏页里选省内存，只占 2 MB 左右，代价是截图会慢一点。
 
 **会在电脑上留下什么？**
 
-不用管理员权限，不改注册表。改过设置后会多一个设置文件，删掉它就恢复默认。
+不用管理员权限，不改注册表。改过设置，或者用保存对话框存过文件（它会记住文件夹）后，会多一个设置文件，删掉它就恢复默认。
 
 **怎么换语言？**
 
@@ -109,7 +117,7 @@
 
 **怎么更新？**
 
-软件每天会到 GitHub 看一眼有没有新版本，有的话右下角会提示，点一下就能更新。只查版本号，不上传任何数据，不想要可以在首选项里关掉。
+软件每天会到 GitHub 看一眼有没有新版本，有的话右下角会提示，点一下就能更新。只查版本号，不上传任何数据，不想要可以在首选项里关掉。便携版不检查更新，需要新版本时到 [Releases](https://github.com/MrTangLuyao/sniplite/releases/latest) 重新下载。
 
 **怎么卸载？**
 
@@ -133,8 +141,9 @@
 
 ## 第三方开源组件
 
-sniplite 本身只用到 Windows 自带的系统库。可选的文字识别模块是别人的成果，原样提供，并附带它们的许可证（在模块的 `ocr` 文件夹里，也在[模块的发布页](https://github.com/MrTangLuyao/sniplite/releases/tag/ocr-1)）：
+sniplite 本身只用到 Windows 自带的系统库。可选的文字识别模块是别人的成果，原样提供，并附带它们的许可证或许可条款的链接（在模块的 `ocr` 文件夹里，也在[模块的发布页](https://github.com/MrTangLuyao/sniplite/releases/tag/ocr-2)）：
 
 - [ONNX Runtime](https://github.com/microsoft/onnxruntime) 1.26.0，Copyright (c) Microsoft Corporation，MIT 许可证
+- ONNX Runtime 需要的 [Microsoft Visual C++](https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files) 运行库 14.51.36247（`msvcp140.dll`、`msvcp140_1.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`），Copyright (c) Microsoft Corporation，不是开源软件，按微软的[许可条款](https://visualstudio.microsoft.com/license-terms/)再分发
 - [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) 的 PP-OCRv6 模型，Copyright (c) PaddlePaddle Authors，Apache 2.0 许可证
 - 模型的 ONNX 格式来自 [RapidOCR](https://github.com/RapidAI/RapidOCR)，Apache 2.0 许可证

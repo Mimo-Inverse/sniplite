@@ -602,7 +602,8 @@ FUNC on_lbutton_up
 ENDF
 
 /* void on_dblclick(POINT p): a text annotation opens for editing; elsewhere in the
- * selection (no tool, no annotation) copies like Enter; otherwise a press. */
+ * selection (no tool, no annotation) copies like Enter; on the button of the tool in use
+ * nothing; otherwise a press. */
 FUNC on_dblclick
         PUSHREG rbx                     /* p */
         ALLOC 32
@@ -616,7 +617,12 @@ FUNC on_dblclick
         jne .Ldc_down
         mov rcx, rbx
         call tb_hit
-        test eax, eax
+        lea ecx, [rax - T_RECT]
+        cmp ecx, T_LAST - T_RECT
+        ja 1f
+        cmp eax, dword ptr [rip + O + OV_TOOL]
+        je .Ldc_ret
+1:      test eax, eax
         jnz .Ldc_down
         mov rcx, rbx
         call anno_at
@@ -649,6 +655,10 @@ FUNC on_dblclick
         add rsp, 32
         pop rbx
         jmp on_lbutton_down
+.Ldc_ret:
+        add rsp, 32
+        pop rbx
+        ret
 ENDF
 
 /* void on_rbutton_up(void) */
@@ -676,9 +686,7 @@ FUNC on_rbutton_up
         add rsp, 40
         jmp back_to_select
 .Lru_drag:                              /* cancel the drag only */
-        lea rcx, [rip + O + OV_ACT]
-        call anno_free
-        mov byte ptr [rip + O + OV_HAS_ACT], 0
+        call act_drop
         call cancel_grab
         inc dword ptr [rip + O + OV_ACT_VER]
         mov dword ptr [rip + O + OV_DRAG], DR_NONE
@@ -715,7 +723,9 @@ FUNC on_wheel
         lea rcx, [rip + O + OV_CHAIN]
         movups xmm0, xmmword ptr [rcx + rax]
         movups xmmword ptr [rip + O + OV_HL], xmm0
-        call snap_remember
+        cmp byte ptr [rip + O + OV_DETECT], DETECT_ELEMENTS
+        jne .Lwh_refresh
+        call snap_remember              /* the choice stays when the elements arrive */
         jmp .Lwh_refresh
 .Lwh_edit:
         cmp byte ptr [rip + O + OV_TE_ON], 0
@@ -755,6 +765,9 @@ FUNC on_wheel
         inc dword ptr [rip + O + OV_ACT_VER]
         jmp .Lwh_refresh
 .Lwh_pick:
+        call prop_tool
+        cmp eax, T_SPOT                 /* a spotlight has no size, picked or as the tool */
+        je .Lwh_refresh
         cmp dword ptr [rip + O + OV_PICK], 0
         jl .Lwh_tool
         cmp dword ptr [rip + O + OV_DRAG], DR_NONE
@@ -1284,16 +1297,18 @@ FUNC ov_proc
         add rax, r10
         jmp rax
 .Lp_high:
-        cmp edx, OV_WM_SNAP_READY
-        je .Lp_snap
         cmp edx, W_WM_DPICHANGED        /* we draw in physical pixels; never let the system resize us */
         je .Lp_zero
+        cmp edx, WM_APP_SNAP_READY
+        je .Lp_snap
 .Lp_def:
         add rsp, 56
 .Lp_inactive:
         jmp qword ptr [rip + __imp_DefWindowProcW]
-.Lp_snap:
-        call update_chain
+.Lp_snap:                               /* snap.c's thread found elements: the chain again */
+        cmp byte ptr [rip + O + OV_DETECT], DETECT_ELEMENTS
+        jne .Lp_zero
+        call snap_update
         call refresh
         jmp .Lp_zero
 .Lp_paint:
@@ -1346,8 +1361,6 @@ FUNC ov_proc
         call on_char
         jmp .Lp_zero
 .Lp_timer:
-        cmp r8, TIMER_SNAP_ANIMATION
-        je .Lp_snap_frame
         cmp r8, TIMER_CARET
         je .Lp_caret
         cmp r8, TIMER_TIP
@@ -1356,9 +1369,6 @@ FUNC ov_proc
         API KillTimer
         mov eax, dword ptr [rip + O + OV_HOVER]
         mov dword ptr [rip + O + OV_TIP], eax
-        call refresh
-        jmp .Lp_zero
-.Lp_snap_frame:                         /* animation only; never query a provider */
         call refresh
         jmp .Lp_zero
 .Lp_caret:                              /* composition mode blinks the drawn caret */

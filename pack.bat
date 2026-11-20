@@ -10,13 +10,20 @@ rem                                                   module: the module's zip i
 rem                                                   unpacks that beside itself when text is first
 rem                                                   read (src\ocr_get.c)
 rem
-rem The module's zip is the one this project publishes under a tag of its own (ocr-1), the very file
-rem Settings downloads: kept in build\sniplite_ocr.zip, fetched once with the curl that comes with
-rem Windows. Its size must be the one src\ocr_get.c names, so the two cannot drift apart.
+rem The module is zipped here, with the tar that comes with Windows, out of build\ocr: onnxruntime.dll,
+rem the two models, the four files of the Visual C++ runtime that DLL needs and the licenses of its
+rem parts, with res\ocr-notice.txt as NOTICE.txt.
 rem
-rem A changed module is a new zip, made by hand: the ocr folder (onnxruntime.dll, the two models,
-rem res\ocr-notice.txt as NOTICE.txt, the licenses of its parts), published under a new tag; the tag
-rem goes here, the tag, the size and the hashes into src\ocr_get.c.
+rem   build\sniplite_ocr.zip            the whole module: what Settings downloads and what the program
+rem                                     with OCR carries
+rem   build\sniplite_ocr_runtime.zip    the runtime files and the notice: what completes a module from
+rem                                     before they came with it
+rem
+rem This project publishes both once, under a tag of their own, which src\ocr_get.c names with the
+rem size of each: the zips made here must have those sizes, so the program and what is published
+rem cannot drift apart. In both, msvcp140.dll is the last of the runtime files: src\ocr_get.c says why.
+rem
+rem A changed module is published under a new tag, with its hashes in src\ocr_get.c.
 setlocal
 cd /d "%~dp0"
 if not exist build\sniplite.exe (echo build\sniplite.exe is missing: run build.bat first & exit /b 1)
@@ -24,24 +31,40 @@ if not exist build\sniplite_win_setup_amd64.exe (echo the installer is missing: 
 for /f "tokens=3" %%v in ('findstr /C:"#define SNIPLITE_VERSION" src\common.h') do set V=%%v
 set V=%V:L"=%
 set V=%V:"=%
-for /f "tokens=3" %%v in ('findstr /C:"#define MODULE_BYTES" src\ocr_get.c') do set BYTES=%%v
-set BYTES=%BYTES:u=%
+set RUNTIME=ocr/vcruntime140.dll ocr/vcruntime140_1.dll ocr/msvcp140_1.dll ocr/msvcp140.dll
+set MODULE=ocr/PP-OCRv6_det_tiny.onnx ocr/PP-OCRv6_rec_tiny.onnx ocr/onnxruntime.dll %RUNTIME%
+set LICENSES=ocr/LICENSE-onnxruntime.txt ocr/LICENSE-PaddleOCR.txt ocr/ThirdPartyNotices-onnxruntime.txt
 set ZIP=build\sniplite_ocr.zip
-set URL=https://github.com/MrTangLuyao/sniplite/releases/download/ocr-1/sniplite_ocr.zip
+set RUNTIME_ZIP=build\sniplite_ocr_runtime.zip
+set TAR=%SystemRoot%\System32\tar.exe
 set D=build\dist
 if exist %D% rmdir /s /q %D%
 mkdir %D% || exit /b 1
 
-if not exist %ZIP% "%SystemRoot%\System32\curl.exe" -sfL -o %ZIP% %URL%
-if not exist %ZIP% (echo could not fetch the module's zip: %URL% & exit /b 1)
-for %%f in (%ZIP%) do if not "%%~zf"=="%BYTES%" (
-  echo %ZIP% is %%~zf bytes, src\ocr_get.c names %BYTES%: delete it to fetch the published one again
+for %%f in (%MODULE% %LICENSES%) do if not exist build\ocr\%%~nxf (
+  echo build\ocr\%%~nxf is missing: the module's files belong in build\ocr
   exit /b 1
 )
+rem through more, the notice's lines end with CR LF whatever the checkout made of them: its size counts
+"%SystemRoot%\System32\more.com" < res\ocr-notice.txt > build\ocr\NOTICE.txt || exit /b 1
+"%TAR%" -a -c -f %ZIP% -C build %MODULE% ocr/NOTICE.txt %LICENSES% || exit /b 1
+"%TAR%" -a -c -f %RUNTIME_ZIP% -C build %RUNTIME% ocr/NOTICE.txt || exit /b 1
+call :sized %ZIP% MODULE_BYTES || exit /b 1
+call :sized %RUNTIME_ZIP% RUNTIME_BYTES || exit /b 1
 
 copy /y build\sniplite_win_setup_amd64.exe %D% >nul || exit /b 1
 copy /y build\sniplite.exe %D%\sniplite_%V%_portable_x64.exe >nul || exit /b 1
 copy /b /y build\sniplite.exe + %ZIP% %D%\sniplite_%V%_portable_with_OCR_x64.exe >nul || exit /b 1
 
-for %%f in (%D%\*) do echo %%~nxf  %%~zf bytes
+for %%f in (%D%\* %ZIP% %RUNTIME_ZIP%) do echo %%~nxf  %%~zf bytes
+exit /b 0
+
+rem %1 has the size src\ocr_get.c names as %2, or the module is not the published one
+:sized
+for /f "tokens=3" %%v in ('findstr /C:"#define %2" src\ocr_get.c') do set BYTES=%%v
+set BYTES=%BYTES:u=%
+for %%f in (%1) do if not "%%~zf"=="%BYTES%" (
+  echo %1 is %%~zf bytes, src\ocr_get.c names %BYTES% as %2
+  exit /b 1
+)
 exit /b 0

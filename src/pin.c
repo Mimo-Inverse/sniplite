@@ -4,6 +4,7 @@
 #include "image.h"
 #include "lang.h"
 #include "ocr.h"
+#include "overlay.h"
 #include "config.h"
 #include "settings.h"
 #include <dwmapi.h>
@@ -15,17 +16,22 @@
 #endif
 
 #define TIMER_LABEL 1
+#define TIMER_REST 2 /* the wheel has stopped zooming */
+#define WM_APP_OUTLINE (WM_APP + 7)
 enum { CM_COPY = 1, CM_SAVE, CM_OCR, CM_RESET, CM_TOP_ALL, CM_TOP, CM_CLOSE, CM_CLOSE_ALL, CM_SETTINGS };
 
 typedef struct Pin {
-    HWND hwnd;
+    HWND hwnd; /* NULL: the window is gone, a save still holds the picture */
     Img img;
     float zoom;
     int alpha; /* percent, 10..100 */
     bool top;  /* this pin above other windows, whatever the setting for all of them says */
     bool drag;
     POINT drag_pt, win_pt;
-    bool show_label;
+    bool rough;    /* shrunk while the wheel turns: stretched the fast way until it rests */
+    int saving;    /* save dialogs open for this pin */
+    RECT label_rc; /* what the label covers; empty: none shows */
+    float label_s; /* the scale label_rc was measured at */
     WCHAR label[32];
     struct Pin *next;
 } Pin;
@@ -69,12 +75,45 @@ void pin_top_all(bool on)
 
 static Pin *pin_of(HWND h) { return (Pin *)GetWindowLongPtrW(h, GWLP_USERDATA); }
 
+static float pin_scale(Pin *p) { return (float)GetDpiForWindow(p->hwnd) / 96.f; }
+
+static HFONT label_font(float s)
+{
+    return CreateFontW(-(int)lroundf(12.f * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                       CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, T(FONT));
+}
+
+/* Stretched the fast way, which gives other pixels straight onto the window than into a bitmap. */
+static bool enlarged(Pin *p, const RECT *rc)
+{
+    return rc->right >= p->img.w && (rc->right != p->img.w || rc->bottom != p->img.h);
+}
+
+static void label_changed(Pin *p, RECT place)
+{
+    RECT rc;
+    GetClientRect(p->hwnd, &rc);
+    InvalidateRect(p->hwnd, enlarged(p, &rc) ? NULL : &place, FALSE);
+}
+
 static void flash_label(Pin *p, const WCHAR *text)
 {
     lstrcpynW(p->label, text, COUNTOF(p->label));
-    p->show_label = true;
+    float s = pin_scale(p);
+    int pad = (int)lroundf(6.f * s);
+    HDC dc = GetDC(p->hwnd);
+    HFONT f = label_font(s);
+    HGDIOBJ of = SelectObject(dc, f);
+    SIZE sz = {0, 0};
+    GetTextExtentPoint32W(dc, p->label, lstrlenW(p->label), &sz);
+    SelectObject(dc, of);
+    DeleteObject(f);
+    ReleaseDC(p->hwnd, dc);
+    RECT was = p->label_rc;
+    p->label_rc = (RECT){0, 0, sz.cx + pad * 2, sz.cy + pad};
+    p->label_s = s;
     SetTimer(p->hwnd, TIMER_LABEL, 900, NULL);
-    InvalidateRect(p->hwnd, NULL, FALSE);
+    label_changed(p, rect_union(was, p->label_rc));
 }
 
 static void set_zoom(Pin *p, float z, POINT anchor)
@@ -89,6 +128,10 @@ static void set_zoom(Pin *p, float z, POINT anchor)
     int nx = anchor.x - (int)lroundf(fx * (float)nw), ny = anchor.y - (int)lroundf(fy * (float)nh);
     p->zoom = z;
     SetWindowPos(p->hwnd, NULL, nx, ny, nw, nh, SWP_NOZORDER | SWP_NOACTIVATE);
+    if (nw != wr.right - wr.left || nh != wr.bottom - wr.top) {
+        p->rough = nw < p->img.w && SetTimer(p->hwnd, TIMER_REST, 120, NULL);
+        InvalidateRect(p->hwnd, NULL, FALSE);
+    }
     WCHAR t[16];
     wsprintfW(t, L"%d%%", (int)lroundf(z * 100.f));
     flash_label(p, t);
@@ -118,22 +161,27 @@ static void pin_copy(Pin *p)
     flash_label(p, T(PIN_COPIED));
 }
 
+static void pin_free(Pin *p)
+{
+    img_destroy(&p->img);
+    mem_free(p);
+}
+
 static void pin_save(Pin *p)
 {
-    /* The dialog runs a nested message loop in which this pin may be closed,
-     * so save from a private copy and re-validate the window afterwards. */
-    Img copy;
-    if (!img_create(&copy, p->img.w, p->img.h))
-        return;
-    memcpy(copy.px, p->img.px, (size_t)p->img.w * p->img.h * 4);
-    HWND h = p->hwnd;
+    /* The dialog runs a nested message loop in which this pin may be closed: while a save
+     * is under way, WM_NCDESTROY leaves the picture and the Pin to it. */
     WCHAR path[MAX_PATH * 2];
-    if (save_dialog(path, COUNTOF(path))) {
-        bool ok = image_save(path, copy.px, copy.w, copy.w, copy.h);
-        if (IsWindow(h) && pin_of(h) == p)
-            flash_label(p, ok ? T(PIN_SAVED) : T(PIN_SAVE_FAILED));
+    p->saving++;
+    bool named = save_dialog(path, COUNTOF(path));
+    bool ok = named && image_save(path, p->img.px, p->img.w, p->img.w, p->img.h);
+    p->saving--;
+    if (!p->hwnd) {
+        if (!p->saving)
+            pin_free(p);
+    } else if (named) {
+        flash_label(p, ok ? T(PIN_SAVED) : T(PIN_SAVE_FAILED));
     }
-    img_destroy(&copy);
 }
 
 static void pin_menu(Pin *p, POINT at)
@@ -189,61 +237,76 @@ static void pin_menu(Pin *p, POINT at)
     }
 }
 
+static void paint_picture(Pin *p, HDC dc, const RECT *rc)
+{
+    if (rc->right == p->img.w && rc->bottom == p->img.h) {
+        BitBlt(dc, 0, 0, rc->right, rc->bottom, p->img.dc, 0, 0, SRCCOPY);
+    } else {
+        SetStretchBltMode(dc, enlarged(p, rc) || p->rough ? COLORONCOLOR : HALFTONE);
+        SetBrushOrgEx(dc, 0, 0, NULL);
+        StretchBlt(dc, 0, 0, rc->right, rc->bottom, p->img.dc, 0, 0, p->img.w, p->img.h, SRCCOPY);
+    }
+}
+
+/* An outline, so a pin stands out from what is behind it: the accent color on the pin in use. Its last row
+ * is where the frame reaches into the window (for the shadow). DWM shows the frame through pixels without
+ * alpha, which is how GDI paints, so that row is drawn from a pixel that has it. */
+static void paint_outline(Pin *p, HDC dc, const RECT *rc)
+{
+    uint32_t c = GetForegroundWindow() == p->hwnd ? 0xFF1A8CFF : 0xFF808080;
+    HBRUSH edge = CreateSolidBrush(RGB(c >> 16 & 0xFF, c >> 8 & 0xFF, c & 0xFF));
+    FrameRect(dc, rc, edge);
+    DeleteObject(edge);
+    BITMAPINFO bi = {{sizeof(BITMAPINFOHEADER), 1, 1, 1, 32, BI_RGB}};
+    SetStretchBltMode(dc, COLORONCOLOR); /* HALFTONE drops the alpha */
+    StretchDIBits(dc, 0, rc->bottom - 1, rc->right, 1, 0, 0, 1, 1, &c, &bi, DIB_RGB_COLORS, SRCCOPY);
+}
+
+/* The label, composed off-screen so it never flickers: by itself, or with all of an enlarged pin.
+ * What is painted afterwards goes around what was composed; false when nothing is left for it. */
+static bool compose_label(Pin *p, HDC dc, const RECT *rc)
+{
+    bool all = enlarged(p, rc), more = true;
+    RECT part = all ? *rc : p->label_rc;
+    HDC mem = CreateCompatibleDC(dc);
+    HBITMAP bmp = CreateCompatibleBitmap(dc, part.right, part.bottom);
+    if (mem && bmp) {
+        HGDIOBJ old = SelectObject(mem, bmp);
+        if (all) {
+            paint_picture(p, mem, rc);
+            paint_outline(p, mem, rc);
+        }
+        HFONT f = label_font(p->label_s);
+        HGDIOBJ of = SelectObject(mem, f);
+        HBRUSH br = CreateSolidBrush(RGB(32, 32, 32));
+        FillRect(mem, &p->label_rc, br);
+        DeleteObject(br);
+        SetBkMode(mem, TRANSPARENT);
+        SetTextColor(mem, RGB(255, 255, 255));
+        DrawTextW(mem, p->label, -1, &p->label_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+        SelectObject(mem, of);
+        DeleteObject(f);
+        BitBlt(dc, 0, 0, part.right, part.bottom, mem, 0, 0, SRCCOPY);
+        SelectObject(mem, old);
+        more = ExcludeClipRect(dc, 0, 0, part.right, part.bottom) != NULLREGION;
+    }
+    if (mem)
+        DeleteDC(mem);
+    if (bmp)
+        DeleteObject(bmp);
+    return more;
+}
+
 static void paint(Pin *p)
 {
     PAINTSTRUCT ps;
     HDC dc = BeginPaint(p->hwnd, &ps);
     RECT rc;
     GetClientRect(p->hwnd, &rc);
-    int w = rc.right, h = rc.bottom;
-    HDC tgt = dc, mem = NULL;
-    HBITMAP bmp = NULL;
-    HGDIOBJ old = NULL;
-    if (p->show_label) { /* compose off-screen so the label never flickers */
-        mem = CreateCompatibleDC(dc);
-        bmp = CreateCompatibleBitmap(dc, w, h);
-        if (mem && bmp) {
-            old = SelectObject(mem, bmp);
-            tgt = mem;
-        }
+    if (rect_empty(&p->label_rc) || compose_label(p, dc, &rc)) {
+        paint_picture(p, dc, &rc);
+        paint_outline(p, dc, &rc);
     }
-    if (w == p->img.w && h == p->img.h) {
-        BitBlt(tgt, 0, 0, w, h, p->img.dc, 0, 0, SRCCOPY);
-    } else {
-        SetStretchBltMode(tgt, w < p->img.w ? HALFTONE : COLORONCOLOR);
-        SetBrushOrgEx(tgt, 0, 0, NULL);
-        StretchBlt(tgt, 0, 0, w, h, p->img.dc, 0, 0, p->img.w, p->img.h, SRCCOPY);
-    }
-    /* an outline, so a pin stands out from what is behind it: the accent color on the pin in use */
-    HBRUSH edge = CreateSolidBrush(GetForegroundWindow() == p->hwnd ? RGB(26, 140, 255) : RGB(128, 128, 128));
-    FrameRect(tgt, &rc, edge);
-    DeleteObject(edge);
-    if (tgt == mem) {
-        float s = (float)GetDpiForWindow(p->hwnd) / 96.f;
-        HFONT f = CreateFontW(-(int)lroundf(12.f * s), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, T(FONT));
-        HGDIOBJ of = SelectObject(mem, f);
-        SIZE sz;
-        GetTextExtentPoint32W(mem, p->label, lstrlenW(p->label), &sz);
-        int pad = (int)lroundf(6.f * s);
-        RECT lr = {0, 0, sz.cx + pad * 2, sz.cy + pad};
-        HBRUSH br = CreateSolidBrush(RGB(32, 32, 32));
-        FillRect(mem, &lr, br);
-        DeleteObject(br);
-        SetBkMode(mem, TRANSPARENT);
-        SetTextColor(mem, RGB(255, 255, 255));
-        DrawTextW(mem, p->label, -1, &lr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-        SelectObject(mem, of);
-        DeleteObject(f);
-        BitBlt(dc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
-    }
-    if (mem) {
-        if (old)
-            SelectObject(mem, old);
-        DeleteDC(mem);
-    }
-    if (bmp)
-        DeleteObject(bmp);
     EndPaint(p->hwnd, &ps);
 }
 
@@ -282,9 +345,18 @@ static LRESULT CALLBACK pin_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         return 0; /* keep physical pixel size across monitors */
     case WM_ERASEBKGND:
         return 1;
-    case WM_ACTIVATE: /* the outline changes color */
-        InvalidateRect(h, NULL, FALSE);
+    case WM_ACTIVATE: /* the outline changes color; posted, as GetForegroundWindow is right only after the activation */
+        PostMessageW(h, WM_APP_OUTLINE, 0, 0);
         break;
+    case WM_APP_OUTLINE: { /* straight onto the window: nothing else is painted for it */
+        RECT rc;
+        GetClientRect(h, &rc);
+        HDC dc = GetDC(h);
+        ExcludeClipRect(dc, 0, 0, p->label_rc.right, p->label_rc.bottom);
+        paint_outline(p, dc, &rc);
+        ReleaseDC(h, dc);
+        return 0;
+    }
     case WM_PAINT:
         paint(p);
         return 0;
@@ -356,8 +428,14 @@ static LRESULT CALLBACK pin_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
     case WM_TIMER:
         if (wp == TIMER_LABEL) {
             KillTimer(h, TIMER_LABEL);
-            p->show_label = false;
-            InvalidateRect(h, NULL, FALSE);
+            label_changed(p, p->label_rc);
+            p->label_rc = (RECT){0};
+        } else if (wp == TIMER_REST) {
+            KillTimer(h, TIMER_REST);
+            if (p->rough) {
+                p->rough = false;
+                InvalidateRect(h, NULL, FALSE);
+            }
         }
         return 0;
     case WM_NCDESTROY: {
@@ -368,8 +446,9 @@ static LRESULT CALLBACK pin_proc(HWND h, UINT m, WPARAM wp, LPARAM lp)
         if (*pp) { /* not listed yet = creation failed; pin_add frees it */
             *pp = p->next;
             P.count--;
-            img_destroy(&p->img);
-            mem_free(p);
+            p->hwnd = NULL;
+            if (!p->saving)
+                pin_free(p);
         }
         return 0;
     }
@@ -404,7 +483,7 @@ bool pin_add(Img *img, int x, int y, bool at_cursor)
     p->alpha = 100;
     int w = p->img.w, h = p->img.h;
     if (at_cursor) {
-        POINT c;
+        POINT c = {0, 0};
         GetCursorPos(&c);
         MONITORINFO mi = {sizeof mi};
         GetMonitorInfoW(MonitorFromPoint(c, MONITOR_DEFAULTTONEAREST), &mi);
@@ -422,8 +501,7 @@ bool pin_add(Img *img, int x, int y, bool at_cursor)
     HWND hw = CreateWindowExW((P.top_all ? WS_EX_TOPMOST : 0) | WS_EX_TOOLWINDOW, L"sniplite.pin", L"sniplite", WS_POPUP | WS_CAPTION, x, y, w,
                               h, NULL, NULL, P.inst, p);
     if (!hw) {
-        img_destroy(&p->img);
-        mem_free(p);
+        pin_free(p);
         return false;
     }
     p->next = P.list;
@@ -440,6 +518,8 @@ bool pin_add(Img *img, int x, int y, bool at_cursor)
     SetForegroundWindow(hw);
     return true;
 }
+
+void pin_also_save(void) { also_save(P.list->img.px, P.list->img.w, P.list->img.h); } /* pin_add puts the newest first */
 
 bool pin_any_visible(void)
 {

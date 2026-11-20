@@ -31,6 +31,7 @@
 #define K_POKE_EXSTYLE 0x08200088       /* WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE */
 #define K_WS_POPUP 0x80000000
 #define K_SRCCOPY 0x00CC0020
+#define K_LOAD_LIBRARY_SEARCH_SYSTEM32 0x800
 #define K_DEVICE_FLAGS 0x29             /* D3D11_CREATE_DEVICE_SINGLETHREADED | BGRA_SUPPORT | PREVENT_INTERNAL_THREADING_OPTIMIZATIONS */
 #define K_D3D_DRIVER_TYPE_UNKNOWN 0
 #define K_D3D11_SDK_VERSION 7
@@ -466,11 +467,15 @@ FUNC gpu_start
         mov qword ptr [rip + g_shot + G_NOTIFY], rcx
         cmp qword ptr [rip + g_shot + G_CREATE_FACTORY], 0
         jne .Lgs_enable
-        lea rcx, [rip + w_dxgi]
-        API LoadLibraryW
+        lea rcx, [rip + w_dxgi]         /* from System32: by name alone the program's folder is searched first */
+        xor edx, edx
+        mov r8d, K_LOAD_LIBRARY_SEARCH_SYSTEM32
+        API LoadLibraryExW
         mov rbx, rax
         lea rcx, [rip + w_d3d11]
-        API LoadLibraryW
+        xor edx, edx
+        mov r8d, K_LOAD_LIBRARY_SEARCH_SYSTEM32
+        API LoadLibraryExW
         mov rsi, rax
         test rbx, rbx
         jz .Lgs_ret

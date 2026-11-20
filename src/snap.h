@@ -1,17 +1,9 @@
-/* Candidate detection. Called on the overlay thread; rectangles use physical
- * screen coordinates. The worker owns all UI Automation interfaces. */
+/* The elements under the mouse while an area is chosen (DETECT_ELEMENTS). Called by the
+ * capture (ov_*.S), on its thread. */
 #pragma once
 #include "common.h"
 
-#define WM_APP_SNAP_READY (WM_APP + 5)
-
-void snap_begin(HWND overlay);
-void snap_request(HWND target, const RECT *bounds, POINT screen);
-int snap_take(RECT *rects, int capacity);
-void snap_end(void);
-
-/* Overlay integration (the assembly state layout stays unchanged). */
-void snap_update(void);
-void snap_remember(void);
-/* Presentation only: OV_HL remains the exact selection/copy target. */
-void snap_visual(RECT *out);
+void snap_begin(void);    /* choosing begins, the overlay is on the screen: a session and its thread */
+void snap_end(void);      /* choosing is over: the session ends, nothing waits for its thread */
+void snap_update(void);   /* O.chain, O.level and O.hl for where the mouse is */
+void snap_remember(void); /* the wheel chose O.hl */
